@@ -20,9 +20,8 @@ namespace Gnomes
 		//internal static PluginConfig BoundConfig { get; private set; } = null;
 		public static AssetBundle ModAssets;
 		private int gnomespawnrate = 300;
+		private int gnomeitemspawnrate = 30;
 
-		private bool playerInfected;
-		private PlayerControllerB randomPlayer;
 
 		private void Awake()
 		{
@@ -39,11 +38,19 @@ namespace Gnomes
 			}
 
 			var GnomeEnemy = ModAssets.LoadAsset<EnemyType>("GnomeAI");
+			var FlashbangGnomeEnemy = ModAssets.LoadAsset<EnemyType>("FlashbangGnomeAi");
+			var GnomeItem = ModAssets.LoadAsset<Item>("GnomeItem");
 
 			// Network Prefabs need to be registered. See https://docs-multiplayer.unity3d.com/netcode/current/basics/object-spawning/
 			// LethalLib registers prefabs on GameNetworkManager.Start.
 			NetworkPrefabs.RegisterNetworkPrefab(GnomeEnemy.enemyPrefab);
+			NetworkPrefabs.RegisterNetworkPrefab(GnomeItem.spawnPrefab);
+			Utilities.FixMixerGroups(GnomeItem.spawnPrefab);
+			Utilities.FixMixerGroups(GnomeEnemy.enemyPrefab);
 			Enemies.RegisterEnemy(GnomeEnemy, gnomespawnrate, Levels.LevelTypes.All, Enemies.SpawnType.Default, null, null);
+			//Enemies.RegisterEnemy(FlashbangGnomeEnemy, gnomespawnrate, Levels.LevelTypes.All, Enemies.SpawnType.Default, null, null);
+			Items.RegisterScrap(GnomeItem, gnomeitemspawnrate, Levels.LevelTypes.All);
+			
 
 			Logger.LogInfo($"Plugin {PluginInfo.PLUGIN_GUID} is loaded!");
 		}
@@ -68,6 +75,7 @@ namespace Gnomes
 		private void loadConfig()
 		{
 			gnomespawnrate = Config.Bind<int>("General", "GnomeSpawnRate", 300, "What should the spawnrate of the Gnome be?").Value;
+			gnomeitemspawnrate = Config.Bind<int>("General", "GnomeItemSpawnRate", 30, "What should the spawnrate of the Gnome Item be?").Value;
 		}
 	}
 }

@@ -19,7 +19,7 @@ namespace Gnomes
 	// Asset bundles cannot contain scripts, so our script lives here. It is important to get the
 	// reference right, or else it will not find this file. See the guide for more information.
 
-	class GnomeAI : EnemyAI
+	class FlashbangGnomeAI : EnemyAI
 	{
 		// We set these in our Asset Bundle, so we can disable warning CS0649:
 		// Field 'field' is never assigned to, and will always have its default value 'value'
@@ -41,6 +41,9 @@ namespace Gnomes
 		private bool stopmoving;
 		private bool hasStopped;
 		private bool wasOwnerLastFrame;
+
+		private float chaseTime;
+		private bool startChase;
 
 		private float stopAndGoMinimumInterval;
 
@@ -83,12 +86,16 @@ namespace Gnomes
 		public override void Update()
 		{
 			base.Update();
-			//StartCoroutine(DrawPath(line, agent));
+			StartCoroutine(DrawPath(line, agent));
 			timeSinceHittingLocalPlayer += Time.deltaTime;
 			timeSinceNewRandPos += Time.deltaTime;
 			var state = currentBehaviourStateIndex;
 
+			if (state == 1 && startChase)
+			{
+				chaseTime += Time.deltaTime;
 
+			}
 
 			if (base.IsOwner)
 			{
@@ -108,12 +115,11 @@ namespace Gnomes
 						agent.speed = 0f;
 					}
 				}
-				bool flag = false;
+				bool flag = true;
 				for (int i = 0; i < GameNetworkManager.Instance.maxAllowedPlayers; i++)
 				{
-					if (PlayerIsTargetable(StartOfRound.Instance.allPlayerScripts[i]) && StartOfRound.Instance.allPlayerScripts[i].HasLineOfSightToPosition(base.transform.position + Vector3.up * 1.6f, 68f)
-						&& Vector3.Distance(StartOfRound.Instance.allPlayerScripts[i].gameplayCamera.transform.position, eye.position) > 0.3f || PlayerIsTargetable(StartOfRound.Instance.allPlayerScripts[i]) &&
-						StartOfRound.Instance.allPlayerScripts[i].HasLineOfSightToPosition(cornerDetection.position + Vector3.up * 1.6f, 68f) && Vector3.Distance(StartOfRound.Instance.allPlayerScripts[i].gameplayCamera.transform.position, eye.position) > 0.3f)
+					if (PlayerIsTargetable(StartOfRound.Instance.allPlayerScripts[i]) && !StartOfRound.Instance.allPlayerScripts[i].HasLineOfSightToPosition(base.transform.position + Vector3.up * 1.6f, 68f)
+						&& Vector3.Distance(StartOfRound.Instance.allPlayerScripts[i].gameplayCamera.transform.position, eye.position) > 0.3f)
 					{
 						flag = true;
 					}
@@ -127,14 +133,13 @@ namespace Gnomes
 					stopAndGoMinimumInterval = 0.15f;
 					stopmoving = flag;
 				}
-				if (stopmoving)
+				if (!stopmoving)
 				{
 					if (!hasStopped)
 					{
 						hasStopped = true;
 
-						if (GameNetworkManager.Instance.localPlayerController.HasLineOfSightToPosition(base.transform.position, 70f, 25) ||
-							(GameNetworkManager.Instance.localPlayerController.HasLineOfSightToPosition(cornerDetection.position, 70f, 25)))
+						if (!GameNetworkManager.Instance.localPlayerController.HasLineOfSightToPosition(base.transform.position, 70f, 25))
 						{
 							agent.speed = 0f;
 						}
@@ -194,7 +199,8 @@ namespace Gnomes
 					for (int i = 0; i < GameNetworkManager.Instance.maxAllowedPlayers; i++)
 					{
 						if (PlayerIsTargetable(StartOfRound.Instance.allPlayerScripts[i])
-									&& !Physics.Linecast(base.transform.position + Vector3.up * 0.5f, StartOfRound.Instance.allPlayerScripts[i].gameplayCamera.transform.position, StartOfRound.Instance.collidersAndRoomMaskAndDefault) && Vector3.Distance(base.transform.position, StartOfRound.Instance.allPlayerScripts[i].transform.position) < 30f)
+							&& !Physics.Linecast(base.transform.position + Vector3.up * 0.5f, StartOfRound.Instance.allPlayerScripts[i].gameplayCamera.transform.position, 
+							StartOfRound.Instance.collidersAndRoomMaskAndDefault) && Vector3.Distance(base.transform.position, StartOfRound.Instance.allPlayerScripts[i].transform.position) < 30f)
 						{
 							SwitchToBehaviourServerRpc((int)State.PlayerFound);
 							return;
@@ -221,6 +227,7 @@ namespace Gnomes
 							//PreviousTargetSetServerRpc();
 							ChangeEnemyOwnerServerRpc(targetPlayer.actualClientId);
 						}
+						startChase = true;
 						movingTowardsTargetPlayer = true;
 					}
 					else
@@ -275,15 +282,9 @@ namespace Gnomes
 			{
 				if (RoundManager.Instance.insideAINodes.Length != 0)
 				{
-					playerControllerB.DropAllHeldItems();
-					Vector3 teleportposition = RoundManager.Instance.insideAINodes[UnityEngine.Random.Range(0, RoundManager.Instance.insideAINodes.Length)].transform.position;
 					Vector3 gnometeleportposition = RoundManager.Instance.insideAINodes[UnityEngine.Random.Range(0, RoundManager.Instance.insideAINodes.Length)].transform.position;
-					teleportposition = RoundManager.Instance.GetRandomNavMeshPositionInRadiusSpherical(teleportposition);
 					gnometeleportposition = RoundManager.Instance.GetRandomNavMeshPositionInRadiusSpherical(gnometeleportposition);
 					timeSinceHittingLocalPlayer = 0f;
-					playerControllerB.movementAudio.PlayOneShot(gnomeTeleport);
-					playerControllerB.averageVelocity = 0f;
-					StartOfRound.Instance.allPlayerScripts[playerControllerB.playerClientId].TeleportPlayer(teleportposition);
 
 					this.serverPosition = gnometeleportposition;
 					this.transform.position = gnometeleportposition;
