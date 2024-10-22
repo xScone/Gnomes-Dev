@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel.Design;
 using System.Diagnostics;
+using System.Net;
 using GameNetcodeStuff;
 using LethalLib.Modules;
 using Unity.Netcode;
@@ -19,7 +20,7 @@ namespace AnomalousDucks
 	// Asset bundles cannot contain scripts, so our script lives here. It is important to get the
 	// reference right, or else it will not find this file. See the guide for more information.
 
-	class GnomeAI : EnemyAI
+	class FlashbangGnomeAI : EnemyAI
 	{
 		// We set these in our Asset Bundle, so we can disable warning CS0649:
 		// Field 'field' is never assigned to, and will always have its default value 'value'
@@ -38,20 +39,22 @@ namespace AnomalousDucks
 		System.Random enemyRandom;
 		bool isDeadAnimationDone;
 		public AudioClip gnomeTeleport;
-		private Vector3 newTeleport;
-		private Vector3 newTeleportPlayer;
-		private bool stopmoving;
-		private bool hasStopped;
-		private bool wasOwnerLastFrame;
 
-		private float stopAndGoMinimumInterval;
+		private float chaseTime;
+		private bool startChase;
+		private bool chaseStarted;
+
+		private float teleportTimer;
+		public AudioClip flashbangSound;
+		private Vector3 newTeleport;
+
 
 		private PlayerControllerB previousTarget;
 
 		enum State
 		{
 			SearchingForPlayer,
-			PlayerFound,
+			PlayerFound
 		}
 
 		[Conditional("DEBUG")]
@@ -63,12 +66,12 @@ namespace AnomalousDucks
 		public override void Start()
 		{
 			base.Start();
-			LogIfDebugBuild("Example Enemy Spawned");
+			LogIfDebugBuild("Blue Gnome Spawned");
 			stareDistance = 40f;
-#if DEBUG
+			#if DEBUG
 			line = gameObject.AddComponent<LineRenderer>();
 			line.widthMultiplier = 0.2f; // reduce width of the line
-#endif
+			#endif
 			timeSinceHittingLocalPlayer = 0;
 			creatureAnimator.SetTrigger("startWalk");
 			timeSinceNewRandPos = 0;
@@ -81,87 +84,103 @@ namespace AnomalousDucks
 
 
 		}
-
+		// everything working except for the gnome going back into search mode after losing the player.
 		public override void Update()
 		{
 			base.Update();
+
+			if (!chaseStarted)
+			{
+				teleportTimer += Time.deltaTime;
+				if (teleportTimer > 45 && GetClosestPlayer() != null)
+				{
+					if (RoundManager.Instance.insideAINodes.Length != 0)
+					{
+						bool gnomeTeleported = false;
+						//base.GetComponentInChildren<AudioSource>().PlayOneShot(gnomeTeleport);
+						if (!gnomeTeleported)
+						{
+							gnomeTeleported = true;
+							timeSinceHittingLocalPlayer = 0f;
+							newTeleport = GenerateTeleportLocation(Vector3.zero, false);
+							this.serverPosition = newTeleport;
+							this.transform.position = newTeleport;
+							this.agent.Warp(newTeleport);
+							this.SyncPositionToClients();
+							StartSearch(transform.position);
+							if (IsOwner && OwnerClientId != 0) 
+							{
+								ChangeEnemyOwnerServerRpc(StartOfRound.Instance.allPlayerScripts[0].actualClientId);
+							}
+							teleportTimer = 0f;
+							SwitchToBehaviourClientRpc((int)State.SearchingForPlayer);
+						}
+					}
+
+				}
+			}
 			//StartCoroutine(DrawPath(line, agent));
 			timeSinceHittingLocalPlayer += Time.deltaTime;
 			timeSinceNewRandPos += Time.deltaTime;
 			var state = currentBehaviourStateIndex;
-
-
-
-			if (base.IsOwner)
+			var flag = false;
+			if (chaseTime <= 3)
 			{
-				if (stopAndGoMinimumInterval > 0f)
-				{
-					stopAndGoMinimumInterval -= Time.deltaTime;
-				}
-				if (!wasOwnerLastFrame)
-				{
-					wasOwnerLastFrame = true;
-					if (!stopmoving)
-					{
-						agent.speed = currentChaseSpeed;
-					}
-					else
-					{
-						agent.speed = 0f;
-					}
-				}
-				bool flag = false;
+				agent.speed = 6f;
+			}
+
+			if (IsOwner)
+			{
 				for (int i = 0; i < GameNetworkManager.Instance.maxAllowedPlayers; i++)
 				{
 					if (PlayerIsTargetable(StartOfRound.Instance.allPlayerScripts[i]) && StartOfRound.Instance.allPlayerScripts[i].HasLineOfSightToPosition(base.transform.position + Vector3.up * 1.6f, 68f)
-						&& Vector3.Distance(StartOfRound.Instance.allPlayerScripts[i].gameplayCamera.transform.position, eye.position) > 0.3f || PlayerIsTargetable(StartOfRound.Instance.allPlayerScripts[i]) &&
-						StartOfRound.Instance.allPlayerScripts[i].HasLineOfSightToPosition(cornerDetection.position + Vector3.up * 1.6f, 68f) && Vector3.Distance(StartOfRound.Instance.allPlayerScripts[i].gameplayCamera.transform.position, eye.position) > 0.3f)
+						&& Vector3.Distance(StartOfRound.Instance.allPlayerScripts[i].gameplayCamera.transform.position, eye.position) > 0.3f)
 					{
 						flag = true;
+						chaseTime = 0;
 					}
-				}
-				if (stunNormalizedTimer > 0f)
-				{
-					flag = true;
-				}
-				if (flag != stopmoving && stopAndGoMinimumInterval <= 0f)
-				{
-					stopAndGoMinimumInterval = 0.15f;
-					stopmoving = flag;
-				}
-				if (stopmoving)
-				{
-					if (!hasStopped)
+					if (startChase != flag)
 					{
-						hasStopped = true;
-
-						if (GameNetworkManager.Instance.localPlayerController.HasLineOfSightToPosition(base.transform.position, 70f, 25) ||
-							(GameNetworkManager.Instance.localPlayerController.HasLineOfSightToPosition(cornerDetection.position, 70f, 25)))
-						{
-							agent.speed = 0f;
-						}
+						startChase = flag;
 					}
+				}
+			}
+			if (chaseStarted)
+			{
+				if (base.IsOwner)
+				{
+					chaseTime += Time.deltaTime;
+					agent.speed = 8f;
+				}
+			}
+			if (startChase)
+			{
+				if (!chaseStarted)
+				{
+					chaseStarted = true;
+					if (GameNetworkManager.Instance.localPlayerController.HasLineOfSightToPosition(base.transform.position, 70f, 25))
+					{
+						chaseTime = 0;
+					}
+				}
+			}
+			else
+			{
+				if (chaseTime >= 6)
+				{
+					chaseStarted = false;
 					if (base.IsOwner)
 					{
-						agent.speed = 0f;
+						StartSearch(transform.position);
+						agent.speed = 2f;
 					}
 				}
 				else
 				{
-					if (hasStopped)
-					{
-						hasStopped = false;
-
-					}
-					if (base.IsOwner)
-					{
-						agent.speed = Mathf.Lerp(agent.speed, currentChaseSpeed, 4.5f * Time.deltaTime);
-						SwitchToBehaviourServerRpc((int)State.SearchingForPlayer);
-					}
-
+					chaseTime += Time.deltaTime;
 				}
-
 			}
+
 
 		}
 		public static IEnumerator DrawPath(LineRenderer line, NavMeshAgent agent)
@@ -196,22 +215,19 @@ namespace AnomalousDucks
 					for (int i = 0; i < GameNetworkManager.Instance.maxAllowedPlayers; i++)
 					{
 						if (PlayerIsTargetable(StartOfRound.Instance.allPlayerScripts[i])
-									&& !Physics.Linecast(base.transform.position + Vector3.up * 0.5f, StartOfRound.Instance.allPlayerScripts[i].gameplayCamera.transform.position, StartOfRound.Instance.collidersAndRoomMaskAndDefault) && Vector3.Distance(base.transform.position, StartOfRound.Instance.allPlayerScripts[i].transform.position) < 30f)
+							&& !Physics.Linecast(base.transform.position + Vector3.up * 0.5f, StartOfRound.Instance.allPlayerScripts[i].gameplayCamera.transform.position, 
+							StartOfRound.Instance.collidersAndRoomMaskAndDefault) && Vector3.Distance(base.transform.position, StartOfRound.Instance.allPlayerScripts[i].transform.position) < 30f)
 						{
 							SwitchToBehaviourServerRpc((int)State.PlayerFound);
 							return;
 						}
 					}
-					
-					agent.speed = 6f;
-					if (currentSearch == null)
-					{
-						movingTowardsTargetPlayer = false;
-						StartSearch(transform.position);
-					}
+					movingTowardsTargetPlayer = false;
+					StartSearch(transform.position);
 					break;
 
 				case (int)State.PlayerFound:
+					agent.speed = 0;
 					if (currentSearch != null)
 					{
 						StopSearch(currentSearch);
@@ -228,6 +244,7 @@ namespace AnomalousDucks
 					}
 					else
 					{
+						agent.speed = 2f;
 						SwitchToBehaviourServerRpc((int)State.SearchingForPlayer);
 						ChangeEnemyOwnerServerRpc(StartOfRound.Instance.allPlayerScripts[0].actualClientId);
 					}
@@ -269,28 +286,17 @@ namespace AnomalousDucks
 
 		public override void OnCollideWithPlayer(Collider other)
 		{
-			if (timeSinceHittingLocalPlayer < 1f)
-			{
-				return;
-			}
 			PlayerControllerB playerControllerB = MeetsStandardPlayerCollisionConditions(other);
 			if (playerControllerB != null)
 			{
 				base.GetComponentInChildren<AudioSource>().PlayOneShot(gnomeTeleport);
+				StunExplosion(base.transform.position, affectAudio: true, 1f, 7.5f, 1f);
 				if (RoundManager.Instance.insideAINodes.Length != 0)
 				{
-					bool playerTeleported = false;
-					if (!playerTeleported)
-					{
-						playerTeleported = true;
-						newTeleport = GenerateTeleportLocation(Vector3.zero, true);
-						playerControllerB.movementAudio.PlayOneShot(gnomeTeleport);
-						playerControllerB.averageVelocity = 0f;
-						StartOfRound.Instance.allPlayerScripts[playerControllerB.playerClientId].TeleportPlayer(newTeleport);
-					}
 					bool gnomeTeleported = false;
 					if (!gnomeTeleported)
 					{
+						GetClosestPlayer().GetComponentInChildren<AudioSource>().PlayOneShot(flashbangSound);
 						GetClosestPlayer().GetComponentInChildren<AudioSource>().PlayOneShot(gnomeTeleport);
 						gnomeTeleported = true;
 						timeSinceHittingLocalPlayer = 0f;
@@ -308,16 +314,18 @@ namespace AnomalousDucks
 					}
 				}
 			}
+
 		}
 		private Vector3 GenerateTeleportLocation(Vector3 teleportposition, bool isPlayer)
 		{
 			Vector3 gnometeleportposition = RoundManager.Instance.insideAINodes[UnityEngine.Random.Range(0, RoundManager.Instance.insideAINodes.Length)].transform.position;
-			if (!isPlayer)
+			Plugin.Logger.LogInfo("Generating Teleport Location!");
+			if (!isPlayer && GetClosestPlayer() != null)
 			{
-				while (Vector3.Distance(gnometeleportposition, GetClosestPlayer().transform.position) <= 60f && GetClosestPlayer().isInsideFactory)
+				while (Vector3.Distance(gnometeleportposition, GetClosestPlayer().transform.position) <= 40f)
 				{
 					gnometeleportposition = RoundManager.Instance.insideAINodes[UnityEngine.Random.Range(0, RoundManager.Instance.insideAINodes.Length)].transform.position;
-					if (Vector3.Distance(gnometeleportposition, GetClosestPlayer().transform.position) >= 60f && GetClosestPlayer().isInsideFactory)
+					if (Vector3.Distance(gnometeleportposition, GetClosestPlayer().transform.position) >= 40f)
 					{
 						gnometeleportposition = RoundManager.Instance.GetRandomNavMeshPositionInRadiusSpherical(gnometeleportposition);
 						teleportposition = gnometeleportposition;
@@ -332,9 +340,78 @@ namespace AnomalousDucks
 				teleportposition = gnometeleportposition;
 				return teleportposition;
 			}
-
+			
 			return teleportposition;
 		}
 
+		private void StunExplosion(Vector3 explosionPosition, bool affectAudio, float flashSeverityMultiplier, float enemyStunTime, float flashSeverityDistanceRolloff = 1f, bool isHeldItem = false, float addToFlashSeverity = 0f)
+		{
+			PlayerControllerB playerControllerB = GameNetworkManager.Instance.localPlayerController;
+			if (GameNetworkManager.Instance.localPlayerController.isPlayerDead && GameNetworkManager.Instance.localPlayerController.spectatedPlayerScript != null)
+			{
+				playerControllerB = GameNetworkManager.Instance.localPlayerController.spectatedPlayerScript;
+			}
+			float num = Vector3.Distance(playerControllerB.transform.position, explosionPosition);
+			float num2 = 7f / (num * flashSeverityDistanceRolloff);
+			if (Physics.Linecast(explosionPosition + Vector3.up * 0.5f, playerControllerB.gameplayCamera.transform.position, StartOfRound.Instance.collidersAndRoomMaskAndDefault, QueryTriggerInteraction.Ignore))
+			{
+				num2 /= 13f;
+			}
+			else if (num < 2f)
+			{
+				num2 = 1f;
+			}
+			else if (!playerControllerB.HasLineOfSightToPosition(explosionPosition, 60f, 15, 2f))
+			{
+				num2 = Mathf.Clamp(num2 / 3f, 0f, 1f);
+			}
+			num2 = Mathf.Clamp(num2 * flashSeverityMultiplier, 0f, 1f);
+			if (num2 > 0.6f)
+			{
+				num2 += addToFlashSeverity;
+			}
+			HUDManager.Instance.flashFilter = num2;
+			if (affectAudio)
+			{
+				SoundManager.Instance.earsRingingTimer = num2;
+			}
+			if (enemyStunTime <= 0f)
+			{
+				return;
+			}
+			Collider[] array = Physics.OverlapSphere(explosionPosition, 12f, 524288);
+			if (array.Length == 0)
+			{
+				return;
+			}
+			for (int i = 0; i < array.Length; i++)
+			{
+				EnemyAICollisionDetect component = array[i].GetComponent<EnemyAICollisionDetect>();
+				if (component == null)
+				{
+					continue;
+				}
+				Vector3 b = component.mainScript.transform.position + Vector3.up * 0.5f;
+				if (component.GetComponentInParent<FlashbangGnomeAI>().DWHasLineOfSightToPosition(explosionPosition + Vector3.up * 0.5f, 120f, 23, 7f) || (!Physics.Linecast(explosionPosition + Vector3.up * 0.5f, component.mainScript.transform.position + Vector3.up * 0.5f, 256) && Vector3.Distance(explosionPosition, b) < 11f))
+				{
+					component.mainScript.SetEnemyStunned(setToStunned: true, enemyStunTime);
+				}
+			}
+		}
+		public bool DWHasLineOfSightToPosition(Vector3 pos, float width = 45f, int range = 30, float proximityAwareness = 7.5f) {
+            if (eye == null) {
+                _ = transform;
+            } else {
+                _ = eye;
+            }
+
+            if (Vector3.Distance(eye.position, pos) < (float)range && !Physics.Linecast(eye.position, pos, StartOfRound.Instance.collidersAndRoomMaskAndDefault)) {
+                Vector3 to = pos - eye.position;
+                if (Vector3.Angle(eye.forward, to) < width || Vector3.Distance(transform.position, pos) < proximityAwareness) {
+                    return true;
+                }
+            }
+            return false;
+        }
 	}
 }

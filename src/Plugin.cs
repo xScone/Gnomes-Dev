@@ -4,10 +4,10 @@ using BepInEx;
 using LethalLib.Modules;
 using BepInEx.Logging;
 using System.IO;
-using Gnomes.Configuration;
+using AnomalousDucks.Configuration;
 using GameNetcodeStuff;
 
-namespace Gnomes
+namespace AnomalousDucks
 {
 	[BepInPlugin(ModGUID, PluginInfo.PLUGIN_NAME, PluginInfo.PLUGIN_VERSION)]
 	[BepInDependency(LethalLib.Plugin.ModGUID)]
@@ -19,10 +19,8 @@ namespace Gnomes
 		internal static new ManualLogSource Logger;
 		//internal static PluginConfig BoundConfig { get; private set; } = null;
 		public static AssetBundle ModAssets;
-		private int gnomespawnrate = 300;
+		private int duckyspawnrate = 100;
 
-		private bool playerInfected;
-		private PlayerControllerB randomPlayer;
 
 		private void Awake()
 		{
@@ -30,20 +28,23 @@ namespace Gnomes
 			loadConfig();
 			InitializeNetworkBehaviours();
 
-			var bundleName = "gnomes-dev";
+			var bundleName = "anomalousducksassets";
 			ModAssets = AssetBundle.LoadFromFile(Path.Combine(Path.GetDirectoryName(Info.Location), bundleName));
 			if (ModAssets == null)
 			{
 				Logger.LogError($"Failed to load custom assets.");
 				return;
 			}
+			
 
-			var GnomeEnemy = ModAssets.LoadAsset<EnemyType>("GnomeAI");
+			var DuckyEnemy = ModAssets.LoadAsset<EnemyType>("DuckyAI");
 
 			// Network Prefabs need to be registered. See https://docs-multiplayer.unity3d.com/netcode/current/basics/object-spawning/
 			// LethalLib registers prefabs on GameNetworkManager.Start.
-			NetworkPrefabs.RegisterNetworkPrefab(GnomeEnemy.enemyPrefab);
-			Enemies.RegisterEnemy(GnomeEnemy, gnomespawnrate, Levels.LevelTypes.All, Enemies.SpawnType.Default, null, null);
+			NetworkPrefabs.RegisterNetworkPrefab(DuckyEnemy.enemyPrefab);
+			Utilities.FixMixerGroups(DuckyEnemy.enemyPrefab);
+			Enemies.RegisterEnemy(DuckyEnemy, duckyspawnrate, Levels.LevelTypes.All, Enemies.SpawnType.Default, null, null);
+			
 
 			Logger.LogInfo($"Plugin {PluginInfo.PLUGIN_GUID} is loaded!");
 		}
@@ -65,9 +66,15 @@ namespace Gnomes
 				}
 			}
 		}
+
+		public int RandomNumber(int value)
+		{
+			System.Random newrandom = new System.Random(StartOfRound.Instance.randomMapSeed);
+			return newrandom.Next(0,100);
+		}
 		private void loadConfig()
 		{
-			gnomespawnrate = Config.Bind<int>("General", "GnomeSpawnRate", 300, "What should the spawnrate of the Gnome be?").Value;
+			duckyspawnrate = Config.Bind<int>("General", "DuckySpawnRate", 100, "What should the spawnrate of SCP-1356 be?").Value;
 		}
 	}
 }
